@@ -55,7 +55,7 @@ Open [http://localhost:3000](http://localhost:3000).
 - **Storage:** Cloudflare R2 using the AWS S3 SDK
 - **Deployment:** Docker, Docker Compose, Amazon ECR Public
 - **LLM and AI:**
-  - Groq OpenAI-compatible API with **Qwen3.8-27B** for structured driver-message interpretation
+  - **Qwen3.8-27B** for structured driver-message interpretation
   - Meta **Llama Prompt Guard 2 86M** for prompt-injection screening
   - **Whisper Large v3** for voice-message transcription
-  - Configurable vision model (the live setup uses **GPT-4o mini**) for document-code extraction and incident-photo classification
+  - Configurable vision model (**GPT-4o mini**) for document-code extraction and incident-photo classification
