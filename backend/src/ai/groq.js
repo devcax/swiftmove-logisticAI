@@ -20,6 +20,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const MAX_ATTEMPTS = 4;
 const isRetryable = (status) => status === 429 || status >= 500;
 
+function retryDelayMs(data, attempt) {
+  const message = data?.error?.message ?? data?.message ?? '';
+  const requestedDelay = /try again in ([\d.]+)s/i.exec(message);
+  if (requestedDelay) return Math.ceil(Number(requestedDelay[1]) * 1000) + 250;
+  return Math.min(2000 * 2 ** (attempt - 1), 12000);
+}
+
 async function chatCompletion({
   model = AI_MODEL,
   messages,

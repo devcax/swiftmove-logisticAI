@@ -36,7 +36,7 @@ import {
 const CLOSURE_STATUSES =
   "DELIVERED,DELIVERED_WITH_EXCEPTION,DRIVER_SUBMITTED_COMPLETION,MANAGER_REVIEW,REQUIRES_CORRECTION";
 
-type QueueTab = "requests" | "cancellations" | "closures";
+type QueueTab = "requests" | "history" | "cancellations" | "closures";
 
 function initials(name: string) {
   return name
@@ -91,6 +91,9 @@ function tabBadgeClass(count: number, activeClasses: string) {
 
 export default function DriverRequestsPage() {
   const [requests, setRequests] = React.useState<ApiJobRequest[] | null>(null);
+  const [requestHistory, setRequestHistory] = React.useState<
+    ApiJobRequest[] | null
+  >(null);
   const [closureJobs, setClosureJobs] = React.useState<ApiJobSummary[] | null>(
     null,
   );
@@ -107,16 +110,19 @@ export default function DriverRequestsPage() {
   const load = React.useCallback(async (showSpinner: boolean) => {
     if (showSpinner) {
       setRequests(null);
+      setRequestHistory(null);
       setClosureJobs(null);
       setCancelJobs(null);
     }
     try {
-      const [requestData, closureData, cancelData] = await Promise.all([
+      const [requestData, historyData, closureData, cancelData] = await Promise.all([
         fetchJobRequests("REQUESTED"),
+        fetchJobRequests("APPROVED,REJECTED"),
         fetchJobs({ status: CLOSURE_STATUSES }),
         fetchJobs({ status: "CANCELLATION_REVIEW" }),
       ]);
       setRequests(requestData);
+      setRequestHistory(historyData);
       setClosureJobs(closureData);
       setCancelJobs(cancelData);
       setError(null);
@@ -141,6 +147,7 @@ export default function DriverRequestsPage() {
       if (decision === "APPROVED") await approveJobRequest(request.id);
       else await rejectJobRequest(request.id);
       setRequests((prev) => prev?.filter((r) => r.id !== request.id) ?? null);
+      await load(false);
     } catch (err) {
       setActionError(
         err instanceof Error
@@ -153,6 +160,7 @@ export default function DriverRequestsPage() {
   };
 
   const pendingCount = requests?.length ?? 0;
+  const historyCount = requestHistory?.length ?? 0;
   const closureCount = closureJobs?.length ?? 0;
   const cancelCount = cancelJobs?.length ?? 0;
 
@@ -223,12 +231,6 @@ export default function DriverRequestsPage() {
     <div className="mx-auto flex h-full w-full max-w-[1500px] flex-col gap-4 overflow-y-auto p-4 sm:p-6 xl:overflow-hidden">
       {/* Page header */}
       <div className="flex w-full shrink-0 flex-row items-center justify-between gap-3">
-        <Typography
-          variant="h5"
-          sx={{ fontWeight: 800, letterSpacing: "-0.01em" }}
-        >
-          Driver Requests
-        </Typography>
         <Button
           component={Link}
           href="/jobs"
@@ -322,6 +324,22 @@ export default function DriverRequestsPage() {
                   )}
                 >
                   {pendingCount}
+                </span>
+              </span>
+            }
+          />
+          <Tab
+            value="history"
+            label={
+              <span className="flex items-center gap-1.5">
+                Request History
+                <span
+                  className={tabBadgeClass(
+                    historyCount,
+                    "bg-slate-200 text-slate-700",
+                  )}
+                >
+                  {historyCount}
                 </span>
               </span>
             }
@@ -430,7 +448,11 @@ export default function DriverRequestsPage() {
                         <Typography
                           variant="caption"
                           component="div"
-                          sx={{ color: "text.secondary", display: "block", mt: 0.25 }}
+                          sx={{
+                            color: "text.secondary",
+                            display: "block",
+                            mt: 0.25,
+                          }}
                         >
                           {request.job.pickup ?? "?"} →{" "}
                           {request.job.delivery ?? "?"}
@@ -545,6 +567,112 @@ export default function DriverRequestsPage() {
         </Paper>
       )}
 
+      {activeTab === "history" && (
+        <Paper className="flex shrink-0 flex-col overflow-hidden xl:min-h-0 xl:flex-1">
+          <div className="slim-scroll flex flex-col xl:min-h-0 xl:flex-1 xl:overflow-y-auto">
+            <Table size="small" sx={tableSx}>
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ width: "22%" }}>Job</TableCell>
+                  <TableCell sx={{ width: "25%" }}>Driver</TableCell>
+                  <TableCell sx={{ width: "28%" }}>Route</TableCell>
+                  <TableCell sx={{ width: "12%" }}>Decision</TableCell>
+                  <TableCell sx={{ width: "13%" }}>Reviewed</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {requestHistory === null && !error && (
+                  <TableRow>
+                    <TableCell colSpan={5} align="center" sx={{ py: 6 }}>
+                      <CircularProgress size={28} />
+                    </TableCell>
+                  </TableRow>
+                )}
+
+                {requestHistory?.map((request) => (
+                  <TableRow
+                    key={request.id}
+                    hover
+                    sx={{ "&:last-child td": { border: 0 } }}
+                  >
+                    <TableCell>
+                      <Typography
+                        variant="body2"
+                        component={Link}
+                        href={`/jobs/${request.job.id}`}
+                        sx={{
+                          fontWeight: 700,
+                          color: "#1d4ed8",
+                          textDecoration: "none",
+                          "&:hover": { textDecoration: "underline" },
+                        }}
+                      >
+                        {request.job.jobNumber}
+                      </Typography>
+                      <Typography
+                        variant="caption"
+                        sx={{ color: "text.secondary" }}
+                      >
+                        {request.job.cargo}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2.5">
+                        <Avatar
+                          sx={{
+                            width: 34,
+                            height: 34,
+                            fontSize: 13,
+                            bgcolor: "#e0f2fe",
+                            color: "#0369a1",
+                          }}
+                        >
+                          {initials(request.driver.name)}
+                        </Avatar>
+                        <div>
+                          <div className="flex items-center gap-0.5">
+                            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                              {request.driver.name}
+                            </Typography>
+                            {request.driver.verified && (
+                              <VerifiedRoundedIcon
+                                sx={{ fontSize: 14, color: "#0ea5e9" }}
+                              />
+                            )}
+                          </div>
+                          <Typography variant="caption" sx={{ color: "#94a3b8" }}>
+                            {request.driver.phone}
+                          </Typography>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                        {request.job.pickup ?? "?"} → {request.job.delivery ?? "?"}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <StatusChip status={request.status} />
+                    </TableCell>
+                    <TableCell sx={{ whiteSpace: "nowrap", color: "text.secondary" }}>
+                      {timeAgo(request.reviewedAt ?? request.requestedAt)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            {requestHistory !== null && requestHistory.length === 0 && !error && (
+              <div className="flex flex-1 flex-row items-center justify-center gap-2 py-8">
+                <InboxRoundedIcon sx={{ fontSize: 18, color: "#cbd5e1" }} />
+                <Typography variant="body2" sx={{ color: "text.secondary", fontWeight: 600 }}>
+                  No approved or rejected requests yet
+                </Typography>
+              </div>
+            )}
+          </div>
+        </Paper>
+      )}
+
       {activeTab === "cancellations" && (
         <Paper className="flex shrink-0 flex-col overflow-hidden xl:min-h-0 xl:flex-1">
           <div className="slim-scroll xl:min-h-0 xl:flex-1 xl:overflow-y-auto">
@@ -615,7 +743,11 @@ export default function DriverRequestsPage() {
                         <Typography
                           variant="caption"
                           component="div"
-                          sx={{ color: "text.secondary", display: "block", mt: 0.25 }}
+                          sx={{
+                            color: "text.secondary",
+                            display: "block",
+                            mt: 0.25,
+                          }}
                         >
                           {job.pickup ?? "?"} → {job.delivery ?? "?"}
                         </Typography>
@@ -741,7 +873,11 @@ export default function DriverRequestsPage() {
                         <Typography
                           variant="caption"
                           component="div"
-                          sx={{ color: "text.secondary", display: "block", mt: 0.25 }}
+                          sx={{
+                            color: "text.secondary",
+                            display: "block",
+                            mt: 0.25,
+                          }}
                         >
                           {job.pickup ?? "?"} → {job.delivery ?? "?"}
                         </Typography>

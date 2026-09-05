@@ -380,6 +380,12 @@ async function verifyDocument(driver, { jobId, stage, extraction, attachmentId =
     await client.query('BEGIN');
     const job = (await client.query('SELECT * FROM jobs WHERE id = $1 FOR UPDATE', [jobId])).rows[0];
     if (!job) throw new WorkflowError('Job not found', 'NOT_FOUND');
+    if (!['PICKUP', 'DELIVERY'].includes(stage)) {
+      throw new WorkflowError('Document stage must be pickup or delivery', 'BAD_DOCUMENT_STAGE');
+    }
+    if (stage === 'DELIVERY' && !job.pickup_verified_at) {
+      throw new WorkflowError('The pickup document must be verified before the delivery document.', 'PICKUP_REQUIRED_FIRST');
+    }
 
     const verifiedColumn = stage === 'PICKUP' ? 'pickup_verified_at' : 'delivery_verified_at';
     const proofColumn = stage === 'PICKUP' ? 'pickup_proof_attachment_id' : 'delivery_proof_attachment_id';
@@ -681,6 +687,9 @@ async function resetJob(jobId, {
     if (job.current_status === 'DRAFT') {
       throw new WorkflowError('A draft job has nothing to reset', 'BAD_STATE');
     }
+    if (job.current_status === 'COMPLETED') {
+      throw new WorkflowError('A completed job is closed and cannot be reset.', 'JOB_FROZEN');
+    }
 
     await client.query(
       `UPDATE drivers SET active_job_id = NULL
@@ -842,6 +851,101 @@ async function endJob(driver, messageId, confidence) {
     });
     await client.query('COMMIT');
     return { job, assignment };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function verifyStageByManager(jobId, stage, managerId = DEMO_MANAGER_ID) {
+  if (!['PICKUP', 'DELIVERY'].includes(stage)) {
+    throw new WorkflowError('Document stage must be pickup or delivery', 'BAD_DOCUMENT_STAGE');
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const job = (await client.query('SELECT * FROM jobs WHERE id = $1 FOR UPDATE', [jobId])).rows[0];
+    if (!job) throw new WorkflowError('Job not found', 'NOT_FOUND');
+    if (sm.isFrozen(job.current_status)) {
+      throw new WorkflowError('This job is closed, so its documents cannot be verified.', 'JOB_FROZEN');
+    }
+    if (stage === 'DELIVERY' && !job.pickup_verified_at) {
+      throw new WorkflowError('Verify the pickup code before verifying the delivery code.', 'PICKUP_REQUIRED_FIRST');
+    }
+
+    const assignment = (await client.query(
+      `SELECT * FROM job_assignments
+        WHERE job_id = $1
+          AND status IN ('PENDING_DRIVER_ACCEPTANCE', 'ASSIGNED', 'ACTIVE', 'CANCELLATION_REVIEW')
+        ORDER BY assigned_at DESC
+        LIMIT 1`,
+      [jobId],
+    )).rows[0] ?? null;
+    if (!assignment || assignment.status !== 'ACTIVE') {
+      throw new WorkflowError('The driver must start this job before its documents can be verified.', 'BAD_STATE');
+    }
+
+    const verifiedColumn = stage === 'PICKUP' ? 'pickup_verified_at' : 'delivery_verified_at';
+    const actualColumn = stage === 'PICKUP' ? 'pickup_actual_at' : 'delivery_actual_at';
+    const alreadyVerified = Boolean(job[verifiedColumn]);
+
+    if (!alreadyVerified) {
+      await client.query(
+        `UPDATE jobs
+            SET ${verifiedColumn} = now(),
+                ${actualColumn} = COALESCE(${actualColumn}, now())
+          WHERE id = $1`,
+        [job.id],
+      );
+      job[verifiedColumn] = new Date();
+      job[actualColumn] = job[actualColumn] ?? new Date();
+      await recordEvent(client, {
+        jobId: job.id,
+        assignmentId: assignment?.id ?? null,
+        eventType: 'DOCUMENT_VERIFIED',
+        data: { stage, method: 'MANAGER_MANUAL' },
+      });
+    }
+
+    const target = stage === 'PICKUP' ? 'LOADED' : 'DELIVERED';
+    const currentRank = await currentMilestoneRank(client, job);
+    const result = alreadyVerified || currentRank >= MILESTONE_RANK[target]
+      ? { applied: [], inferred: [], newStatus: job.current_status, kind: 'NOOP', noop: true }
+      : await executeTransition({
+        client,
+        job,
+        assignment,
+        eventType: target,
+        source: 'MANAGER',
+        verification: { stage, method: 'MANAGER_MANUAL' },
+        actor: { actorType: 'MANAGER', actorUserId: managerId },
+      });
+
+    await audit(client, {
+      organizationId: job.organization_id,
+      actorType: 'MANAGER',
+      actorUserId: managerId,
+      action: `${stage}_DOCUMENT_VERIFIED`,
+      entityType: 'JOB',
+      entityId: job.id,
+      after: { stage, status: result.newStatus, method: 'MANAGER_MANUAL' },
+    });
+    await client.query('COMMIT');
+
+    const driver = assignment
+      ? (await pool.query(
+        `SELECT d.id, d.name, wa.phone_e164
+           FROM drivers d
+           LEFT JOIN driver_whatsapp_accounts wa ON wa.driver_id = d.id AND wa.is_primary
+          WHERE d.id = $1`,
+        [assignment.driver_id],
+      )).rows[0] ?? null
+      : null;
+
+    return { job, driver, assignment, alreadyVerified, ...result };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -1556,6 +1660,15 @@ async function reportDelay(driver, data, messageId, confidence) {
       jobId: job.id, assignmentId: assignment.id, messageId,
       eventType: 'DELAY_REPORTED', data, confidence,
     });
+    const delayStage = ['PICKUP', 'DELIVERY'].includes(data.stage) ? data.stage : null;
+    const delayReason = String(data.reason ?? 'Delay reported').trim().slice(0, 500);
+    if (delayStage) {
+      const reasonColumn = delayStage === 'PICKUP' ? 'pickup_delay_reason' : 'delivery_delay_reason';
+      await client.query(
+        `UPDATE jobs SET ${reasonColumn} = COALESCE(${reasonColumn}, $2) WHERE id = $1`,
+        [job.id, delayReason],
+      );
+    }
     await setJobStatus(client, job, 'DELAYED', { actorType: 'DRIVER', actorDriverId: driver.id });
     const minutes = Number(data.delay_minutes) || 0;
     await notifyManagers(client, {
@@ -1945,6 +2058,7 @@ module.exports = {
   stageDelay,
   applyPendingVerifications,
   applyPendingVerificationsForJob,
+  verifyStageByManager,
   reportIncident,
   requestCancellation,
   resolveCancellation,

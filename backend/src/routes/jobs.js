@@ -563,32 +563,19 @@ router.post('/:id/verify', async (req, res) => {
     return res.status(400).json({ error: "stage must be 'PICKUP' or 'DELIVERY'." });
   }
   try {
-    const detail = await loadJobDetail(req.params.id);
-    if (!detail) return res.status(404).json({ error: 'Job not found' });
-    const column = stage === 'PICKUP' ? 'pickup_verified_at' : 'delivery_verified_at';
-    const actualColumn = stage === 'PICKUP' ? 'pickup_actual_at' : 'delivery_actual_at';
-    const now = new Date();
-    await pool.query(
-      `UPDATE jobs SET ${column} = COALESCE(${column}, $2), ${actualColumn} = COALESCE(${actualColumn}, $2) WHERE id = $1`,
-      [req.params.id, now]
-    );
-    await pool.query(
-      `INSERT INTO workflow_events (job_id, event_type, event_status, event_data, applied_at)
-       VALUES ($1, 'DOCUMENT_VERIFIED', 'APPLIED', $2, $3)`,
-      [req.params.id, JSON.stringify({ stage, method: 'MANAGER_MANUAL' }), now]
-    );
-    const cont = await workflow.applyPendingVerificationsForJob(req.params.id);
+    const result = await workflow.verifyStageByManager(req.params.id, stage, DEMO_MANAGER_ID);
+    if (!result.alreadyVerified && result.driver?.phone_e164) {
+      await bot.sendManagerVerification({ job: result.job, driver: result.driver, stage });
+    }
     res.json({
       ok: true,
       stage,
-      verifiedAt: now,
-      status: cont?.job?.current_status ?? detail.job.current_status,
-      needsStartConfirmation: cont?.needsStartConfirmation ?? false,
-      needsDelayReason: Boolean(cont?.needsDelayReason),
+      verifiedAt: stage === 'PICKUP' ? result.job.pickup_verified_at : result.job.delivery_verified_at,
+      status: result.newStatus,
+      alreadyVerified: result.alreadyVerified,
     });
   } catch (err) {
-    console.error('verifyJobStage failed:', err.message);
-    res.status(500).json({ error: 'Failed to verify the document.' });
+    handleError(res, err, 'Failed to verify the document');
   }
 });
 

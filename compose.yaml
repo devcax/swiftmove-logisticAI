@@ -2,7 +2,7 @@ name: swiftmove
 
 services:
   app:
-    image: swiftmove:latest
+    image: public.ecr.aws/r9b2q0m6/swiftmove:latest
     build:
       context: .
       dockerfile: Dockerfile

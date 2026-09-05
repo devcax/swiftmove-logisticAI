@@ -356,7 +356,13 @@ export function completeJob(id: string): Promise<{ ok: boolean; status: string }
 export function markJobVerified(
   id: string,
   stage: "PICKUP" | "DELIVERY"
-): Promise<{ ok: boolean; stage: string; verifiedAt: string }> {
+): Promise<{
+  ok: boolean;
+  stage: string;
+  verifiedAt: string;
+  status: string;
+  alreadyVerified: boolean;
+}> {
   return request(`/api/jobs/${id}/verify`, { method: "POST", body: JSON.stringify({ stage }) });
 }
 

@@ -1,6 +1,6 @@
-const { chatCompletion } = require('./groq');
+const { chatCompletion } = require("./groq");
 
-const VOICE_PROMPT = `You are the friendly dispatcher of DevCax Logistics, chatting with truck drivers on WhatsApp.
+const VOICE_PROMPT = `You are the friendly dispatcher of SwiftMove Logistics, chatting with truck drivers on WhatsApp.
 You will be given a SITUATION (what just happened / what must be communicated) and CONTEXT (the driver's trip state).
 
 Write ONE WhatsApp reply:
@@ -17,54 +17,81 @@ Write ONE WhatsApp reply:
 - Reply with the message text only — no quotes, no explanations.`;
 
 function firstName(name) {
-  return String(name ?? '').trim().split(/\s+/)[0] || 'there';
+  return (
+    String(name ?? "")
+      .trim()
+      .split(/\s+/)[0] || "there"
+  );
 }
 
 const EMOJI_PATTERN =
   /[\u{1F300}-\u{1FAFF}\u{1F000}-\u{1F2FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}\u{E0020}-\u{E007F}]/gu;
 
 function sanitizeVoice(text) {
-  return String(text ?? '')
-    .replace(EMOJI_PATTERN, '')
-    .replace(/[ \t]*[—–][ \t]*/g, ', ')
-    .replace(/[ \t]{2,}/g, ' ')
-    .replace(/[ \t]+([,.!?:;])/g, '$1')
-    .replace(/,\s*,/g, ',')
-    .replace(/,(\s*\n)/g, '$1')
-    .replace(/[ \t]+$/gm, '')
-    .replace(/^[ \t]+/gm, '')
+  return String(text ?? "")
+    .replace(EMOJI_PATTERN, "")
+    .replace(/[ \t]*[—–][ \t]*/g, ", ")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+([,.!?:;])/g, "$1")
+    .replace(/,\s*,/g, ",")
+    .replace(/,(\s*\n)/g, "$1")
+    .replace(/[ \t]+$/gm, "")
+    .replace(/^[ \t]+/gm, "")
     .trim();
 }
 
-async function friendlyReply({ situation, driverName, activeJob = null, activeJobSummary = null, availableJobs = [], driverMessage = null, recentMessages = [] }) {
+async function friendlyReply({
+  situation,
+  driverName,
+  activeJob = null,
+  activeJobSummary = null,
+  availableJobs = [],
+  driverMessage = null,
+  recentMessages = [],
+}) {
   try {
     const context = {
       driver_first_name: firstName(driverName),
       active_job: activeJob
-        ? { job_number: activeJob.job_number, status: activeJob.status, pickup: activeJob.pickup, delivery: activeJob.delivery }
+        ? {
+            job_number: activeJob.job_number,
+            status: activeJob.status,
+            pickup: activeJob.pickup,
+            delivery: activeJob.delivery,
+          }
         : null,
       trip_summary: activeJobSummary || null,
-      open_jobs: availableJobs.map((j) => `${j.job_number} (${j.pickup ?? '?'} → ${j.delivery ?? '?'})`),
+      open_jobs: availableJobs.map(
+        (j) => `${j.job_number} (${j.pickup ?? "?"} → ${j.delivery ?? "?"})`,
+      ),
       driver_message: driverMessage,
-      recent_chat: recentMessages.slice(-4).map((m) => `${m.sender}: ${m.text}`),
+      recent_chat: recentMessages
+        .slice(-4)
+        .map((m) => `${m.sender}: ${m.text}`),
     };
     const text = await chatCompletion({
       messages: [
-        { role: 'system', content: VOICE_PROMPT },
-        { role: 'user', content: `SITUATION:\n${situation}\n\nCONTEXT:\n${JSON.stringify(context, null, 2)}\n\nWrite the reply now.` },
+        { role: "system", content: VOICE_PROMPT },
+        {
+          role: "user",
+          content: `SITUATION:\n${situation}\n\nCONTEXT:\n${JSON.stringify(context, null, 2)}\n\nWrite the reply now.`,
+        },
       ],
       temperature: 0.5,
       maxTokens: 140,
     });
     const cleaned = sanitizeVoice(
-      String(text ?? '')
-        .replace(/<think>[\s\S]*?<\/think>/g, '')
-        .replace(/^["']|["']$/g, '')
+      String(text ?? "")
+        .replace(/<think>[\s\S]*?<\/think>/g, "")
+        .replace(/^["']|["']$/g, ""),
     );
     if (!cleaned || cleaned.length > 500) return null;
     return cleaned;
   } catch (err) {
-    console.warn('friendlyReply unavailable, using static fallback:', err.message);
+    console.warn(
+      "friendlyReply unavailable, using static fallback:",
+      err.message,
+    );
     return null;
   }
 }

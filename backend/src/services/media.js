@@ -42,6 +42,22 @@ const EXT_BY_MIME = {
   'application/pdf': 'pdf',
 };
 
+async function objectUrl(bucket, key) {
+  const base = process.env.R2_PUBLIC_URL;
+  if (base) return `${base.replace(/\/$/, '')}/${key}`;
+  const client = getS3Client();
+  if (!client) return null;
+  try {
+    return await getSignedUrl(
+      client,
+      new GetObjectCommand({ Bucket: bucket, Key: key }),
+      { expiresIn: 30 * 24 * 3600 },
+    );
+  } catch {
+    return null;
+  }
+}
+
 async function storeInboundMedia(messageId, scope = 'general') {
   const client = getS3Client();
   const cfg = parseR2Config();

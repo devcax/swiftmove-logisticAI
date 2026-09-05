@@ -42,6 +42,7 @@ next-env.d.ts
 
 # documentation / planning markdown files
 *.md
+!README.md
 AI WhatsApp Logistics MVP.md
 AI-Powered WhatsApp Logistics Workflow.md
 Logistics AI MVP_ Big-Picture System Map and Task Plan.md

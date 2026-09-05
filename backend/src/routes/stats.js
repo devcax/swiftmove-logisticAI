@@ -116,10 +116,9 @@ router.get('/sidebar-notifications', async (_req, res) => {
 });
 
 router.get('/overview', async (_req, res) => {
-  const client = await pool.connect();
   try {
     const [counts, requestCounts, incidentCounts] = await Promise.all([
-      client.query(
+      pool.query(
         `SELECT
            COUNT(*) FILTER (WHERE current_status = 'PUBLISHED')::int AS published,
            COUNT(*) FILTER (WHERE current_status = 'DELAYED')::int AS delayed,
@@ -128,10 +127,10 @@ router.get('/overview', async (_req, res) => {
          FROM jobs WHERE organization_id = $1`,
         [DEMO_ORG_ID, ACTIVE_STATUSES, AWAITING_COMPLETION]
       ),
-      client.query(
+      pool.query(
         `SELECT COUNT(*)::int AS count FROM job_requests WHERE status = 'REQUESTED'`
       ),
-      client.query(
+      pool.query(
         `SELECT COUNT(*)::int AS count FROM incidents WHERE status IN ('OPEN', 'UNDER_REVIEW')`
       ),
     ]);
@@ -140,7 +139,7 @@ router.get('/overview', async (_req, res) => {
     const driverRequests = requestCounts.rows[0].count;
     const openIncidents = incidentCounts.rows[0].count;
 
-    const jobs = await client.query(
+    const jobs = await pool.query(
       `SELECT j.id, j.job_number, j.current_status, j.updated_at,
               pl.name AS origin, dl.name AS destination,
               d.name AS driver,
@@ -164,7 +163,7 @@ router.get('/overview', async (_req, res) => {
       [DEMO_ORG_ID, ACTIVE_STATUSES]
     );
 
-    const incidents = await client.query(
+    const incidents = await pool.query(
       `SELECT i.id, i.description, i.created_at, j.job_number
          FROM incidents i
          JOIN jobs j ON j.id = i.job_id
@@ -173,7 +172,7 @@ router.get('/overview', async (_req, res) => {
         LIMIT 8`
     );
 
-    const feed = await client.query(
+    const feed = await pool.query(
       `SELECT ai.primary_intent, ai.confidence_score, ai.structured_output, ai.created_at, j.job_number
          FROM ai_interpretations ai
          JOIN messages m ON m.id = ai.message_id
@@ -227,8 +226,6 @@ router.get('/overview', async (_req, res) => {
   } catch (err) {
     console.error('overview failed:', err.message);
     res.status(500).json({ error: 'Could not load the operations overview.' });
-  } finally {
-    client.release();
   }
 });
 

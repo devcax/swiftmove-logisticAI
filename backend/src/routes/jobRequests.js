@@ -6,7 +6,16 @@ const bot = require('../services/bot');
 const router = express.Router();
 
 router.get('/', async (req, res) => {
-  const status = req.query.status ?? 'REQUESTED';
+  const allowedStatuses = new Set([
+    'REQUESTED', 'CANCELLED_BY_DRIVER', 'REJECTED', 'APPROVED', 'EXPIRED',
+  ]);
+  const statuses = String(req.query.status ?? 'REQUESTED')
+    .split(',')
+    .map((status) => status.trim().toUpperCase())
+    .filter((status) => allowedStatuses.has(status));
+  if (statuses.length === 0) {
+    return res.status(400).json({ error: 'A valid request status is required.' });
+  }
   const result = await pool.query(
     `SELECT jr.id, jr.status, jr.requested_at, jr.reviewed_at,
             j.id AS job_id, j.job_number, j.cargo_description, j.pickup_at,
@@ -24,10 +33,10 @@ router.get('/', async (req, res) => {
        LEFT JOIN job_items ji ON ji.job_id = j.id
        JOIN drivers d ON d.id = jr.driver_id
        LEFT JOIN driver_whatsapp_accounts wa ON wa.driver_id = d.id AND wa.is_primary
-      WHERE jr.status = $1
-      ORDER BY jr.requested_at ASC
+      WHERE jr.status = ANY($1::text[])
+      ORDER BY jr.reviewed_at DESC NULLS LAST, jr.requested_at DESC
       LIMIT 100`,
-    [status]
+    [statuses]
   );
 
   res.json(

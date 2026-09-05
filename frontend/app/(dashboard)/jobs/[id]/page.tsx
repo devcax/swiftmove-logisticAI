@@ -149,6 +149,28 @@ function latestStatus(status: string, assignmentStatus: string | null | undefine
   return status;
 }
 
+function progressRank(job: ApiJobDetail, timeline: ApiTimelineEvent[]) {
+  const directRank = LADDER_RANK[job.status];
+  if (directRank != null) return directRank;
+
+  let rank = job.assignment ? LADDER_RANK.ASSIGNED : LADDER_RANK.PUBLISHED;
+  if (job.assignment?.startedAt) rank = LADDER_RANK.IN_PROGRESS;
+  if (job.pickupActualAt) rank = Math.max(rank, LADDER_RANK.ARRIVED_AT_PICKUP);
+  if (job.pickupVerifiedAt) rank = Math.max(rank, LADDER_RANK.LOADED);
+  if (job.deliveryActualAt) rank = Math.max(rank, LADDER_RANK.ARRIVED_AT_DELIVERY);
+  if (job.deliveryVerifiedAt) rank = Math.max(rank, LADDER_RANK.DELIVERED);
+
+  for (const event of timeline) {
+    if (event.status !== "APPLIED" && event.status !== "CONFIRMED") continue;
+    const eventRank = event.type === "START_JOB"
+      ? LADDER_RANK.IN_PROGRESS
+      : LADDER_RANK[event.type];
+    if (eventRank != null) rank = Math.max(rank, eventRank);
+  }
+
+  return rank;
+}
+
 const PROVENANCE_KEYS = new Set([
   "inferred",
   "inferred_by",
@@ -342,7 +364,7 @@ export default function JobDetailPage() {
 
   const pickup = job.stops.find((s) => s.type === "PICKUP");
   const delivery = job.stops.find((s) => s.type === "DELIVERY");
-  const ladderIndex = LADDER_RANK[job.status] ?? 0;
+  const ladderIndex = progressRank(job, timeline);
   const finalStatuses = ["COMPLETED", "CANCELLED"];
   const inCancellationReview = job.status === "CANCELLATION_REVIEW";
   const inCompletionReview = [
@@ -396,16 +418,18 @@ export default function JobDetailPage() {
           >
             Release Driver
           </Button>
-          <Button
-            color="error"
-            variant="outlined"
-            size="small"
-            startIcon={<RestartAltRoundedIcon />}
-            disabled={busy || job.status === "DRAFT"}
-            onClick={() => setResetOpen(true)}
-          >
-            Reset Job
-          </Button>
+          {job.status !== "COMPLETED" && (
+            <Button
+              color="error"
+              variant="outlined"
+              size="small"
+              startIcon={<RestartAltRoundedIcon />}
+              disabled={busy || job.status === "DRAFT"}
+              onClick={() => setResetOpen(true)}
+            >
+              Reset Job
+            </Button>
+          )}
           {!finalStatuses.includes(job.status) && !inCancellationReview && (
             <Button
               color="error"

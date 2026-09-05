@@ -232,10 +232,33 @@ router.delete('/:id', async (req, res) => {
     await client.query(`UPDATE incidents SET source_message_id = NULL WHERE source_message_id IN (${driverMessages})`, [driverId]);
     await client.query(`DELETE FROM ai_interpretations WHERE message_id IN (${driverMessages})`, [driverId]);
 
+    await client.query(
+      `WITH driver_attachments AS (
+         SELECT a.id
+           FROM attachments a
+           JOIN messages m ON m.id = a.message_id
+           JOIN conversations c ON c.id = m.conversation_id
+          WHERE c.driver_id = $1
+       )
+       UPDATE jobs
+          SET pickup_proof_attachment_id = CASE
+                WHEN pickup_proof_attachment_id IN (SELECT id FROM driver_attachments) THEN NULL
+                ELSE pickup_proof_attachment_id
+              END,
+              delivery_proof_attachment_id = CASE
+                WHEN delivery_proof_attachment_id IN (SELECT id FROM driver_attachments) THEN NULL
+                ELSE delivery_proof_attachment_id
+              END
+        WHERE pickup_proof_attachment_id IN (SELECT id FROM driver_attachments)
+           OR delivery_proof_attachment_id IN (SELECT id FROM driver_attachments)`,
+      [driverId]
+    );
+
     await client.query(`UPDATE notifications SET incident_id = NULL WHERE incident_id IN (SELECT id FROM incidents WHERE reported_by_driver_id = $1)`, [driverId]);
     await client.query(`DELETE FROM incidents WHERE reported_by_driver_id = $1`, [driverId]);
 
     await client.query(`UPDATE workflow_events SET assignment_id = NULL WHERE assignment_id IN (SELECT id FROM job_assignments WHERE driver_id = $1)`, [driverId]);
+    await client.query(`UPDATE incidents SET assignment_id = NULL WHERE assignment_id IN (SELECT id FROM job_assignments WHERE driver_id = $1)`, [driverId]);
     await client.query(`DELETE FROM job_assignments WHERE driver_id = $1`, [driverId]);
     await client.query(`DELETE FROM job_requests WHERE driver_id = $1`, [driverId]);
 

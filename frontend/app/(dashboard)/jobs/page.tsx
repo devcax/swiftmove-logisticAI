@@ -181,6 +181,8 @@ export default function JobsPage() {
 
   React.useEffect(() => {
     void loadJobs();
+    const timer = window.setInterval(() => void loadJobs(), 5_000);
+    return () => window.clearInterval(timer);
   }, [loadJobs]);
 
   const loadIdentifiers = React.useCallback(async () => {

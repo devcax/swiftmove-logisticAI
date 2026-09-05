@@ -21,6 +21,12 @@ async function offerPublishedJob(jobId) {
     )).rows[0];
     if (!job || job.current_status !== 'PUBLISHED') return { offered: 0, matched: 0, candidates: 0, skipped: 'NOT_PUBLISHED' };
 
+    const pickupAt = new Date(job.pickup_at).getTime();
+    const now = Date.now();
+    if (!Number.isFinite(pickupAt) || pickupAt < now || pickupAt >= now + 24 * 60 * 60 * 1000) {
+      return { offered: 0, matched: 0, candidates: 0, skipped: 'OUTSIDE_REQUEST_WINDOW' };
+    }
+
     const items = (await pool.query(
       'SELECT description, planned_quantity, unit FROM job_items WHERE job_id = $1',
       [job.id]
