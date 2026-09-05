@@ -24,7 +24,12 @@ import {
   type DriverFormErrors,
 } from "@/lib/driverForm";
 
-const initialForm = { fullName: "", phone: "", vehicleType: "", licensePlate: "" };
+const initialForm = {
+  fullName: "",
+  phone: "",
+  vehicleType: "",
+  licensePlate: "",
+};
 
 const fieldLabelSx = {
   color: "#64748b",
@@ -43,25 +48,43 @@ interface AddDriverDialogProps {
   existingPhones?: string[];
 }
 
-export default function AddDriverDialog({ open, onClose, onCreated, existingPhones = [] }: AddDriverDialogProps) {
+export default function AddDriverDialog({
+  open,
+  onClose,
+  onCreated,
+  existingPhones = [],
+}: AddDriverDialogProps) {
   const [form, setForm] = React.useState(initialForm);
-  const [touched, setTouched] = React.useState<Partial<Record<keyof typeof initialForm, boolean>>>({});
+  const [touched, setTouched] = React.useState<
+    Partial<Record<keyof typeof initialForm, boolean>>
+  >({});
   const [submitting, setSubmitting] = React.useState(false);
-  const [toast, setToast] = React.useState<{ severity: "success" | "error"; message: string } | null>(null);
+  const [toast, setToast] = React.useState<{
+    severity: "success" | "error";
+    message: string;
+  } | null>(null);
 
   const errors: DriverFormErrors = validateDriverForm(form);
-  const errorFor = (key: keyof typeof initialForm) => (touched[key] ? errors[key] : undefined);
+  const errorFor = (key: keyof typeof initialForm) =>
+    touched[key] ? errors[key] : undefined;
 
   const set =
     (key: keyof typeof initialForm) =>
     (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
       const raw = event.target.value;
-      const value = key === "phone" ? formatPhoneInput(raw) : key === "licensePlate" ? formatPlateInput(raw) : raw;
+      const value =
+        key === "phone"
+          ? formatPhoneInput(raw)
+          : key === "licensePlate"
+            ? formatPlateInput(raw)
+            : raw;
       setForm((prev) => ({ ...prev, [key]: value }));
-      if (key === "vehicleType") setTouched((prev) => ({ ...prev, vehicleType: true }));
+      if (key === "vehicleType")
+        setTouched((prev) => ({ ...prev, vehicleType: true }));
     };
 
-  const blur = (key: keyof typeof initialForm) => () => setTouched((prev) => ({ ...prev, [key]: true }));
+  const blur = (key: keyof typeof initialForm) => () =>
+    setTouched((prev) => ({ ...prev, [key]: true }));
 
   const reset = () => {
     setForm(initialForm);
@@ -75,13 +98,25 @@ export default function AddDriverDialog({ open, onClose, onCreated, existingPhon
   };
 
   const submit = async () => {
-    setTouched({ fullName: true, phone: true, vehicleType: true, licensePlate: true });
+    setTouched({
+      fullName: true,
+      phone: true,
+      vehicleType: true,
+      licensePlate: true,
+    });
     if (Object.keys(errors).length > 0) return;
 
     const e164 = toE164(form.phone);
     if (!e164) return;
-    if (existingPhones.some((phone) => phone.replace(/\D/g, "") === e164.replace(/\D/g, ""))) {
-      setToast({ severity: "error", message: "A driver with this phone number is already registered" });
+    if (
+      existingPhones.some(
+        (phone) => phone.replace(/\D/g, "") === e164.replace(/\D/g, ""),
+      )
+    ) {
+      setToast({
+        severity: "error",
+        message: "A driver with this phone number is already registered",
+      });
       return;
     }
 
@@ -93,14 +128,24 @@ export default function AddDriverDialog({ open, onClose, onCreated, existingPhon
         vehicleType: form.vehicleType,
         licensePlate: form.licensePlate.trim().toUpperCase(),
       });
-      onCreated?.({ ...driver, vehicleType: driver.vehicleType ?? undefined, licensePlate: driver.licensePlate ?? undefined });
-      setToast({ severity: "success", message: `${driver.name} added! WhatsApp invite sent to ${driver.phone}` });
+      onCreated?.({
+        ...driver,
+        vehicleType: driver.vehicleType ?? undefined,
+        licensePlate: driver.licensePlate ?? undefined,
+      });
+      setToast({
+        severity: "success",
+        message: `${driver.name} added! WhatsApp invite sent to ${driver.phone}`,
+      });
       reset();
       onClose();
     } catch (err) {
       setToast({
         severity: "error",
-        message: err instanceof Error ? err.message : "Could not add the driver. Please try again.",
+        message:
+          err instanceof Error
+            ? err.message
+            : "Could not add the driver. Please try again.",
       });
     } finally {
       setSubmitting(false);
@@ -117,7 +162,12 @@ export default function AddDriverDialog({ open, onClose, onCreated, existingPhon
           <div className="min-w-0 flex-1">
             <Typography variant="subtitle1">Add Driver</Typography>
           </div>
-          <IconButton size="small" onClick={handleClose} disabled={submitting} aria-label="Close dialog">
+          <IconButton
+            size="small"
+            onClick={handleClose}
+            disabled={submitting}
+            aria-label="Close dialog"
+          >
             <CloseRoundedIcon fontSize="small" />
           </IconButton>
         </div>
@@ -142,7 +192,7 @@ export default function AddDriverDialog({ open, onClose, onCreated, existingPhon
           </div>
           <div>
             <Typography variant="caption" sx={fieldLabelSx}>
-              Phone number
+              Whatsapp number
             </Typography>
             <TextField
               fullWidth
@@ -152,10 +202,17 @@ export default function AddDriverDialog({ open, onClose, onCreated, existingPhon
               onChange={set("phone")}
               onBlur={blur("phone")}
               error={errorFor("phone") !== undefined}
-              helperText={errorFor("phone") }
+              helperText={errorFor("phone")}
               disabled={submitting}
               autoComplete="tel"
-              slotProps={{ input: { inputMode: "numeric", startAdornment: <InputAdornment position="start">+94</InputAdornment> } }}
+              slotProps={{
+                input: {
+                  inputMode: "numeric",
+                  startAdornment: (
+                    <InputAdornment position="start">+94</InputAdornment>
+                  ),
+                },
+              }}
             />
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -201,14 +258,22 @@ export default function AddDriverDialog({ open, onClose, onCreated, existingPhon
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-5 py-4">
-          <Button variant="outlined" onClick={handleClose} disabled={submitting}>
+          <Button
+            variant="outlined"
+            onClick={handleClose}
+            disabled={submitting}
+          >
             Cancel
           </Button>
           <Button
             variant="contained"
             onClick={() => void submit()}
             disabled={submitting}
-            startIcon={submitting ? <CircularProgress size={16} color="inherit" /> : undefined}
+            startIcon={
+              submitting ? (
+                <CircularProgress size={16} color="inherit" />
+              ) : undefined
+            }
           >
             {submitting ? "Adding…" : "Add Driver"}
           </Button>
@@ -221,7 +286,11 @@ export default function AddDriverDialog({ open, onClose, onCreated, existingPhon
         onClose={() => setToast(null)}
         anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
       >
-        <Alert severity={toast?.severity ?? "info"} variant="filled" onClose={() => setToast(null)}>
+        <Alert
+          severity={toast?.severity ?? "info"}
+          variant="filled"
+          onClose={() => setToast(null)}
+        >
           {toast?.message}
         </Alert>
       </Snackbar>

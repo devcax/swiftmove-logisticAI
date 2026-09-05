@@ -43,6 +43,7 @@ import { type ChatMessage, type Conversation } from "@/lib/data";
 import {
   fetchConversations,
   fetchConversationMessages,
+  markConversationRead,
   sendManagerMessage,
   setConversationTakeover,
   clearConversation,
@@ -92,10 +93,38 @@ function StatusTick({ status }: { status?: ChatMessage["deliveryStatus"] }) {
 function DriverBubble({ message }: { message: ChatMessage }) {
   const isLocation = message.type === "LOCATION";
   const isVideo = message.type === "VIDEO";
+  const image = message.attachments?.find(
+    (attachment) => attachment.type === "IMAGE" && attachment.publicUrl,
+  );
+  const caption = message.text !== "[Image]" ? message.text : "";
   return (
     <div className="flex flex-col items-start">
       <div className="max-w-[80%] rounded-2xl rounded-tl-sm bg-white px-4 py-2.5 shadow-sm sm:max-w-[62%]">
-        {isLocation ? (
+        {image?.publicUrl ? (
+          <>
+            <a href={image.publicUrl} target="_blank" rel="noreferrer" className="block">
+              <Box
+                component="img"
+                src={image.publicUrl}
+                alt={image.filename ?? "Image sent by driver"}
+                loading="lazy"
+                sx={{
+                  display: "block",
+                  maxWidth: "100%",
+                  maxHeight: 320,
+                  borderRadius: 1.5,
+                  objectFit: "contain",
+                  bgcolor: "#f1f5f9",
+                }}
+              />
+            </a>
+            {caption && (
+              <Typography variant="body2" sx={{ mt: 1, whiteSpace: "pre-wrap" }}>
+                {caption}
+              </Typography>
+            )}
+          </>
+        ) : isLocation ? (
           <a
             href={`https://www.google.com/maps?q=${encodeURIComponent(message.text)}`}
             target="_blank"
@@ -285,6 +314,7 @@ export default function ConversationsPage() {
                 time: timeLabel(message.time),
                 deliveryStatus: message.deliveryStatus,
                 interpretation: message.interpretation,
+                attachments: message.attachments,
               })),
             }
           : thread,
@@ -320,6 +350,11 @@ export default function ConversationsPage() {
   const openThread = (id: string) => {
     setActiveId(id);
     setThreads((prev) => prev.map((thread) => (thread.id === id ? { ...thread, unread: 0 } : thread)));
+    void markConversationRead(id)
+      .then(refreshConversations)
+      .catch(() => {
+        // The next poll will synchronize the server state; keep the thread usable meanwhile.
+      });
   };
 
   const sendMessage = async () => {

@@ -185,6 +185,15 @@ export interface AiInterpretation {
   fields: { label: string; value: string }[];
 }
 
+export interface ChatAttachment {
+  id: string;
+  type: string;
+  filename: string | null;
+  mimeType: string | null;
+  publicUrl: string | null;
+  createdAt: string;
+}
+
 export interface ChatMessage {
   id: string;
   kind: MessageKind;
@@ -193,6 +202,7 @@ export interface ChatMessage {
   time: string;
   interpretation?: AiInterpretation;
   deliveryStatus?: "RECEIVED" | "QUEUED" | "SENT" | "DELIVERED" | "READ" | "FAILED";
+  attachments?: ChatAttachment[];
 }
 
 export interface Conversation {

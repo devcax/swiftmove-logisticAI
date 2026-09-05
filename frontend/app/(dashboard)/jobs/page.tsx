@@ -33,11 +33,10 @@ import StatusChip from "@/components/StatusChip";
 import { activateJob, createJob, deactivateJob, deleteJob, fetchJob, fetchJobIdentifiers, fetchJobs, updateJob, type ApiJobSummary } from "@/lib/api";
 import { type Job, type JobStatus } from "@/lib/data";
 
-const tabs: ("ALL" | JobStatus)[] = ["ALL", "DRAFT", "PUBLISHED", "ACTIVE", "COMPLETED", "CANCELLED"];
+const tabs: ("ALL" | JobStatus)[] = ["ALL", "PUBLISHED", "ACTIVE", "COMPLETED", "CANCELLED"];
 
 const cardLabel: Record<string, string> = {
   ALL: "All Jobs",
-  DRAFT: "Drafts",
   PUBLISHED: "Published Jobs",
   ACTIVE: "Active Jobs",
   COMPLETED: "Completed",
@@ -46,7 +45,6 @@ const cardLabel: Record<string, string> = {
 
 const cardHint: Record<string, { text: string; color: string }> = {
   ALL: { text: "Every status", color: "#64748b" },
-  DRAFT: { text: "Not yet published", color: "#64748b" },
   PUBLISHED: { text: "In the pool", color: "#2563eb" },
   ACTIVE: { text: "On the road", color: "#16a34a" },
   COMPLETED: { text: "Delivered", color: "#64748b" },
@@ -73,12 +71,27 @@ function toLocalInput(value: string | null) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function tomorrowLocalInput() {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  d.setHours(0, 0, 0, 0);
-  return toLocalInput(d.toISOString());
+// A datetime-local input holds a bare wall clock ("2026-09-07T10:00") with no
+// timezone, so it must be resolved to a real instant here - in the browser,
+// where the user's timezone is - before it goes to the API.
+function fromLocalInput(value: string) {
+  if (!value) return undefined;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return undefined;
+  return d.toISOString();
 }
+
+// Earliest pickup a manager can pick: 1 hour from now (so "today" stays
+// selectable, not just "tomorrow").
+function oneHourFromNowLocalInput() {
+  return toLocalInput(new Date(Date.now() + 60 * 60 * 1000).toISOString());
+}
+
+// Drivers only get offered a published job if its pickup falls within the
+// next 24 hours (see backend jobOffers.offerPublishedJob) - jobs scheduled
+// further out won't be sent to anyone until they roll inside that window.
+const DRIVER_DISCOVERY_WINDOW_NOTE =
+  "Drivers are only notified once the pickup time is within 24 hours — jobs scheduled further out won't reach anyone until then.";
 
 function mapJob(job: ApiJobSummary): Job {
   return {
@@ -232,8 +245,8 @@ export default function JobsPage() {
         jobNumber: form.jobNumber || undefined,
         pickupLocation: form.pickupLocation.trim(),
         deliveryLocation: form.deliveryLocation.trim(),
-        pickupAt: form.pickupAt,
-        deliveryAt: form.deliveryAt,
+        pickupAt: fromLocalInput(form.pickupAt),
+        deliveryAt: fromLocalInput(form.deliveryAt),
         cargo: form.cargo.trim(),
         quantity: form.quantity.trim(),
         unit: form.unit,
@@ -389,8 +402,8 @@ export default function JobsPage() {
         const updated = await updateJob(id, {
           pickupLocation: editForm.pickupLocation.trim(),
           deliveryLocation: editForm.deliveryLocation.trim(),
-          pickupAt: editForm.pickupAt || undefined,
-          deliveryAt: editForm.deliveryAt || undefined,
+          pickupAt: fromLocalInput(editForm.pickupAt),
+          deliveryAt: fromLocalInput(editForm.deliveryAt),
           cargo: editForm.cargo.trim(),
           quantity: editForm.quantity.trim(),
           unit: editForm.unit,
@@ -497,7 +510,7 @@ export default function JobsPage() {
             startIcon={<AddRoundedIcon />}
             onClick={() => {
               setCreateOpen(true);
-              setMinPickupAt(tomorrowLocalInput());
+              setMinPickupAt(oneHourFromNowLocalInput());
               void loadIdentifiers();
             }}
             sx={{ bgcolor: "#1e3a8a", "&:hover": { bgcolor: "#172554" } }}
@@ -806,7 +819,7 @@ export default function JobsPage() {
                 value={form.pickupAt}
                 onChange={set("pickupAt")}
                 error={pickupError}
-                helperText={pickupError ? "Pickup must be scheduled for tomorrow or later" : undefined}
+                helperText={pickupError ? "Pickup must be at least 1 hour from now" : undefined}
                 slotProps={{ htmlInput: { min: minPickupAt } }}
               />
             </div>
@@ -834,6 +847,9 @@ export default function JobsPage() {
               />
             </div>
           </div>
+          <Typography variant="caption" sx={{ color: "#94a3b8", display: "block", mt: -1.5 }}>
+            {DRIVER_DISCOVERY_WINDOW_NOTE}
+          </Typography>
           <div>
             <Typography variant="caption" sx={fieldLabelSx}>
               Cargo description <span className="text-red-600">*</span>
@@ -973,6 +989,9 @@ export default function JobsPage() {
                 />
               </div>
             </div>
+            <Typography variant="caption" sx={{ color: "#94a3b8", display: "block", mt: -1.5 }}>
+              {DRIVER_DISCOVERY_WINDOW_NOTE}
+            </Typography>
             <div>
               <Typography variant="caption" sx={fieldLabelSx}>Cargo description</Typography>
               <TextField fullWidth size="small" value={editForm.cargo} onChange={setEdit("cargo")} />

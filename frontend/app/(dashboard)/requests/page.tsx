@@ -6,6 +6,7 @@ import Avatar from "@mui/material/Avatar";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
+import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import Paper from "@mui/material/Paper";
 import Tab from "@mui/material/Tab";
@@ -25,11 +26,13 @@ import StatusChip from "@/components/StatusChip";
 import {
   ApiJobRequest,
   ApiJobSummary,
+  ApiRequestHistoryEntry,
   approveJobRequest,
   cancellationDecision,
   completeJob,
   fetchJobRequests,
   fetchJobs,
+  fetchRequestHistory,
   rejectJobRequest,
 } from "@/lib/api";
 
@@ -37,6 +40,17 @@ const CLOSURE_STATUSES =
   "DELIVERED,DELIVERED_WITH_EXCEPTION,DRIVER_SUBMITTED_COMPLETION,MANAGER_REVIEW,REQUIRES_CORRECTION";
 
 type QueueTab = "requests" | "history" | "cancellations" | "closures";
+
+// Request History mixes three different kinds of driver ask - label each row
+// so it's clear at a glance which one a given decision was for.
+const REQUEST_TYPE_META: Record<
+  ApiRequestHistoryEntry["type"],
+  { label: string; bg: string; fg: string }
+> = {
+  JOB_REQUEST: { label: "Job request", bg: "#eff6ff", fg: "#1d4ed8" },
+  CANCELLATION: { label: "Cancellation", bg: "#fef2f2", fg: "#b91c1c" },
+  CLOSURE: { label: "Closure", bg: "#f0fdf4", fg: "#15803d" },
+};
 
 function initials(name: string) {
   return name
@@ -92,7 +106,7 @@ function tabBadgeClass(count: number, activeClasses: string) {
 export default function DriverRequestsPage() {
   const [requests, setRequests] = React.useState<ApiJobRequest[] | null>(null);
   const [requestHistory, setRequestHistory] = React.useState<
-    ApiJobRequest[] | null
+    ApiRequestHistoryEntry[] | null
   >(null);
   const [closureJobs, setClosureJobs] = React.useState<ApiJobSummary[] | null>(
     null,
@@ -117,7 +131,7 @@ export default function DriverRequestsPage() {
     try {
       const [requestData, historyData, closureData, cancelData] = await Promise.all([
         fetchJobRequests("REQUESTED"),
-        fetchJobRequests("APPROVED,REJECTED"),
+        fetchRequestHistory(),
         fetchJobs({ status: CLOSURE_STATUSES }),
         fetchJobs({ status: "CANCELLATION_REVIEW" }),
       ]);
@@ -329,22 +343,6 @@ export default function DriverRequestsPage() {
             }
           />
           <Tab
-            value="history"
-            label={
-              <span className="flex items-center gap-1.5">
-                Request History
-                <span
-                  className={tabBadgeClass(
-                    historyCount,
-                    "bg-slate-200 text-slate-700",
-                  )}
-                >
-                  {historyCount}
-                </span>
-              </span>
-            }
-          />
-          <Tab
             value="cancellations"
             label={
               <span className="flex items-center gap-1.5">
@@ -372,6 +370,22 @@ export default function DriverRequestsPage() {
                   )}
                 >
                   {closureCount}
+                </span>
+              </span>
+            }
+          />
+          <Tab
+            value="history"
+            label={
+              <span className="flex items-center gap-1.5">
+                Request History
+                <span
+                  className={tabBadgeClass(
+                    historyCount,
+                    "bg-slate-200 text-slate-700",
+                  )}
+                >
+                  {historyCount}
                 </span>
               </span>
             }
@@ -573,9 +587,10 @@ export default function DriverRequestsPage() {
             <Table size="small" sx={tableSx}>
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ width: "22%" }}>Job</TableCell>
-                  <TableCell sx={{ width: "25%" }}>Driver</TableCell>
-                  <TableCell sx={{ width: "28%" }}>Route</TableCell>
+                  <TableCell sx={{ width: "12%" }}>Type</TableCell>
+                  <TableCell sx={{ width: "18%" }}>Job</TableCell>
+                  <TableCell sx={{ width: "22%" }}>Driver</TableCell>
+                  <TableCell sx={{ width: "23%" }}>Route</TableCell>
                   <TableCell sx={{ width: "12%" }}>Decision</TableCell>
                   <TableCell sx={{ width: "13%" }}>Reviewed</TableCell>
                 </TableRow>
@@ -583,82 +598,99 @@ export default function DriverRequestsPage() {
               <TableBody>
                 {requestHistory === null && !error && (
                   <TableRow>
-                    <TableCell colSpan={5} align="center" sx={{ py: 6 }}>
+                    <TableCell colSpan={6} align="center" sx={{ py: 6 }}>
                       <CircularProgress size={28} />
                     </TableCell>
                   </TableRow>
                 )}
 
-                {requestHistory?.map((request) => (
-                  <TableRow
-                    key={request.id}
-                    hover
-                    sx={{ "&:last-child td": { border: 0 } }}
-                  >
-                    <TableCell>
-                      <Typography
-                        variant="body2"
-                        component={Link}
-                        href={`/jobs/${request.job.id}`}
-                        sx={{
-                          fontWeight: 700,
-                          color: "#1d4ed8",
-                          textDecoration: "none",
-                          "&:hover": { textDecoration: "underline" },
-                        }}
-                      >
-                        {request.job.jobNumber}
-                      </Typography>
-                      <Typography
-                        variant="caption"
-                        sx={{ color: "text.secondary" }}
-                      >
-                        {request.job.cargo}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2.5">
-                        <Avatar
+                {requestHistory?.map((request) => {
+                  const typeMeta = REQUEST_TYPE_META[request.type];
+                  return (
+                    <TableRow
+                      key={request.id}
+                      hover
+                      sx={{ "&:last-child td": { border: 0 } }}
+                    >
+                      <TableCell>
+                        <Chip
+                          size="small"
+                          label={typeMeta.label}
                           sx={{
-                            width: 34,
-                            height: 34,
-                            fontSize: 13,
-                            bgcolor: "#e0f2fe",
-                            color: "#0369a1",
+                            bgcolor: typeMeta.bg,
+                            color: typeMeta.fg,
+                            fontWeight: 700,
+                            fontSize: 11,
+                            height: 22,
+                          }}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Typography
+                          variant="body2"
+                          component={Link}
+                          href={`/jobs/${request.job.id}`}
+                          sx={{
+                            fontWeight: 700,
+                            color: "#1d4ed8",
+                            textDecoration: "none",
+                            "&:hover": { textDecoration: "underline" },
                           }}
                         >
-                          {initials(request.driver.name)}
-                        </Avatar>
-                        <div>
-                          <div className="flex items-center gap-0.5">
-                            <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                              {request.driver.name}
+                          {request.job.jobNumber}
+                        </Typography>
+                        <Typography
+                          variant="caption"
+                          component="div"
+                          sx={{ color: "text.secondary", display: "block", mt: 0.25 }}
+                        >
+                          {request.job.cargo}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2.5">
+                          <Avatar
+                            sx={{
+                              width: 34,
+                              height: 34,
+                              fontSize: 13,
+                              bgcolor: "#e0f2fe",
+                              color: "#0369a1",
+                            }}
+                          >
+                            {initials(request.driver.name)}
+                          </Avatar>
+                          <div>
+                            <div className="flex items-center gap-0.5">
+                              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                {request.driver.name}
+                              </Typography>
+                              {request.driver.verified && (
+                                <VerifiedRoundedIcon
+                                  sx={{ fontSize: 14, color: "#0ea5e9" }}
+                                />
+                              )}
+                            </div>
+                            <Typography variant="caption" sx={{ color: "#94a3b8" }}>
+                              {request.driver.phone}
                             </Typography>
-                            {request.driver.verified && (
-                              <VerifiedRoundedIcon
-                                sx={{ fontSize: 14, color: "#0ea5e9" }}
-                              />
-                            )}
                           </div>
-                          <Typography variant="caption" sx={{ color: "#94a3b8" }}>
-                            {request.driver.phone}
-                          </Typography>
                         </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" sx={{ color: "text.secondary" }}>
-                        {request.job.pickup ?? "?"} → {request.job.delivery ?? "?"}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <StatusChip status={request.status} />
-                    </TableCell>
-                    <TableCell sx={{ whiteSpace: "nowrap", color: "text.secondary" }}>
-                      {timeAgo(request.reviewedAt ?? request.requestedAt)}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                          {request.job.pickup ?? "?"} → {request.job.delivery ?? "?"}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <StatusChip status={request.decision} />
+                      </TableCell>
+                      <TableCell sx={{ whiteSpace: "nowrap", color: "text.secondary" }}>
+                        {timeAgo(request.decidedAt)}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
             {requestHistory !== null && requestHistory.length === 0 && !error && (

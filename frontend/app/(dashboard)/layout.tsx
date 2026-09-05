@@ -422,24 +422,18 @@ export default function DashboardLayout({
 
         const path = window.location.pathname;
         const onJobs = path.startsWith("/jobs");
-        const onConversations = path.startsWith("/conversations");
-        const onIncidents = path.startsWith("/incidents");
         const onRequests = path.startsWith("/requests");
 
         if (previous === null) {
           setCounts({
             jobs: 0,
-            conversations: onConversations ? 0 : sidebarCounts.conversations,
-            incidents: onIncidents ? 0 : notifications.incidentIds.length,
+            conversations: sidebarCounts.conversations,
+            incidents: notifications.incidentIds.length,
             requests: onRequests ? 0 : notifications.jobRequestIds.length,
           });
           return;
         }
 
-        const newMessages = notificationCount(
-          notifications.driverMessageIds,
-          previous.driverMessageIds,
-        );
         const newLiveJobs = notificationCount(
           notifications.liveJobStamps,
           previous.liveJobStamps,
@@ -455,8 +449,8 @@ export default function DashboardLayout({
 
         setCounts((current) => ({
           jobs: onJobs ? 0 : current.jobs + newLiveJobs,
-          conversations: onConversations ? 0 : current.conversations + newMessages,
-          incidents: onIncidents ? 0 : current.incidents + newIncidents,
+          conversations: sidebarCounts.conversations,
+          incidents: current.incidents + newIncidents,
           requests: onRequests ? 0 : current.requests + newRequests,
         }));
       } catch {
@@ -474,16 +468,6 @@ export default function DashboardLayout({
     if (pathname.startsWith("/jobs")) {
       setCounts((current) =>
         current.jobs === 0 ? current : { ...current, jobs: 0 },
-      );
-    }
-    if (pathname.startsWith("/conversations")) {
-      setCounts((current) =>
-        current.conversations === 0 ? current : { ...current, conversations: 0 },
-      );
-    }
-    if (pathname.startsWith("/incidents")) {
-      setCounts((current) =>
-        current.incidents === 0 ? current : { ...current, incidents: 0 },
       );
     }
     if (pathname.startsWith("/requests")) {

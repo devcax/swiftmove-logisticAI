@@ -10,6 +10,7 @@ const { transcribeAudio } = require("../ai/groq");
 const vision = require("../ai/vision");
 const documentCode = require("../ai/documentCode");
 const { friendlyReply, firstName, sanitizeVoice } = require("../ai/companion");
+const { formatWhen } = require("../time");
 const workflow = require("./workflow");
 const summarizer = require("./summarizer");
 const vehicleMatch = require("../ai/vehicleMatch");
@@ -52,6 +53,36 @@ async function clearPendingAction(conversationId) {
     "UPDATE conversations SET pending_action = NULL WHERE id = $1",
     [conversationId],
   );
+}
+
+async function quotedApplyInviteJobId(conversationId, replyToMessageId) {
+  if (!replyToMessageId) return null;
+
+  const message = await pool.query(
+    `SELECT body_text
+       FROM messages
+      WHERE conversation_id = $1
+        AND external_message_id = $2
+        AND sender_type = 'BOT'
+      LIMIT 1`,
+    [conversationId, replyToMessageId],
+  );
+  const body = message.rows[0]?.body_text ?? '';
+  if (!/tap\s+apply\s+now/i.test(body)) return null;
+
+  const jobNumber = body.match(/\bJOB-[A-Z0-9-]+\b/i)?.[0];
+  if (!jobNumber) return null;
+
+  const job = await pool.query(
+    `SELECT j.id
+       FROM jobs j
+       JOIN conversations c ON c.organization_id = j.organization_id
+      WHERE c.id = $1
+        AND upper(j.job_number) = upper($2)
+      LIMIT 1`,
+    [conversationId, jobNumber],
+  );
+  return job.rows[0]?.id ?? null;
 }
 
 async function isAiPaused(conversationId) {
@@ -819,6 +850,7 @@ async function processInboundCore({
   messageType,
   bodyText,
   buttonId,
+  replyToMessageId,
 }) {
   const d = {
     id: driver.driver_id ?? driver.id,
@@ -827,7 +859,7 @@ async function processInboundCore({
     vehicle_type: driver.vehicle_type ?? null,
   };
   const phone = (driver.phone_e164 ?? "").replace(/\D/g, "") || driver.waId;
-  const ctx = { d, phone, conversationId, messageId };
+  const ctx = { d, phone, conversationId, messageId, replyToMessageId };
 
   try {
     if (buttonId) {
@@ -985,6 +1017,19 @@ async function processInboundCore({
     ctx.driverText = text;
     const candidate = await interpretMessage({ text, driver: d, ...interpCtx });
     await storeInterpretation(messageId, candidate, "COMPLETED");
+
+    const quotedJobId = await quotedApplyInviteJobId(
+      conversationId,
+      replyToMessageId,
+    );
+    const isApplyReply =
+      candidate.intent === "CONFIRM_EVENT" ||
+      candidate.intent === "REQUEST_JOB" ||
+      /^apply(?:\s+now)?$/i.test(text);
+    if (quotedJobId && isApplyReply) {
+      await clearPendingAction(conversationId);
+      return await submitApplyRequest(ctx, quotedJobId);
+    }
 
     if (
       pending?.type === "AWAITING_ACCEPT_DECLINE" &&
@@ -1186,9 +1231,17 @@ async function submitApplyRequest(ctx, jobId) {
 async function handleButton(buttonId, ctx) {
   const { d, conversationId, messageId } = ctx;
 
+  if (buttonId.startsWith("APPLY_JOB:")) {
+    return await submitApplyRequest(ctx, buttonId.slice("APPLY_JOB:".length));
+  }
+
   if (buttonId === "APPLY_JOB") {
+    const quotedJobId = await quotedApplyInviteJobId(
+      conversationId,
+      ctx.replyToMessageId,
+    );
     const pending = await getPendingAction(conversationId);
-    const jobId = pending?.job_id;
+    const jobId = quotedJobId ?? pending?.job_id;
     await clearPendingAction(conversationId);
     if (!jobId)
       return await reply({
@@ -1803,9 +1856,8 @@ async function applyCandidate(candidate, ctx, { confirmed }) {
         });
       }
       const lines = history.rows.map((r) => {
-        const when = r.completed_at
-          ? ` (finished ${new Date(r.completed_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })})`
-          : "";
+        const finished = formatWhen(r.completed_at, { day: "2-digit", month: "short" });
+        const when = finished ? ` (finished ${finished})` : "";
         return `• *${r.job_number}*: ${r.pickup ?? "?"} → ${r.delivery ?? "?"}, ${r.cargo_description}${when}`;
       });
       return await reply({
@@ -2070,14 +2122,12 @@ async function sendJobOffer({ job, driver }) {
 }
 
 async function sendJobApplyInvite({ job, driver }) {
-  const when = job.pickup_at
-    ? new Date(job.pickup_at).toLocaleString("en-GB", {
-        day: "numeric",
-        month: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-    : null;
+  const when = formatWhen(job.pickup_at, {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
   const route = [job.pickup, job.delivery].filter(Boolean).join(" to ");
   const quantity =
     job.quantity != null ? `, ${job.quantity} ${job.unit ?? ""}`.trimEnd() : "";
@@ -2088,7 +2138,7 @@ async function sendJobApplyInvite({ job, driver }) {
     job,
     driver,
     body: `New job just posted${vehicle}: *${job.job_number}*, ${job.cargo_description}${quantity}${route ? `, ${route}` : ""}.${when ? ` Pickup ${when}.` : ""} Tap Apply now and I'll put your name in for manager approval.`,
-    buttons: [{ id: "APPLY_JOB", title: "Apply now" }],
+    buttons: [{ id: `APPLY_JOB:${job.id}`, title: "Apply now" }],
     pendingType: "AWAITING_APPLY",
   });
 }

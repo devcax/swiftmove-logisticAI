@@ -5,6 +5,7 @@ const workflow = require('../services/workflow');
 const bot = require('../services/bot');
 const jobOffers = require('../services/jobOffers');
 const { interpretationFields } = require('../services/format');
+const { parseInstant } = require('../time');
 
 const router = express.Router();
 
@@ -145,12 +146,8 @@ router.post('/', async (req, res) => {
   const pickupCode = String(b.pickupCode ?? '').trim().slice(0, 40) || generateSecurityCode('PU');
   const deliveryCode = String(b.deliveryCode ?? '').trim().slice(0, 40) || generateSecurityCode('DL');
 
-  const pickupAt = b.pickupAt && !Number.isNaN(Date.parse(b.pickupAt))
-    ? new Date(b.pickupAt)
-    : new Date(Date.now() + 24 * 3600 * 1000);
-  const deliveryAt = b.deliveryAt && !Number.isNaN(Date.parse(b.deliveryAt))
-    ? new Date(b.deliveryAt)
-    : null;
+  const pickupAt = parseInstant(b.pickupAt) ?? new Date(Date.now() + 24 * 3600 * 1000);
+  const deliveryAt = parseInstant(b.deliveryAt);
 
   if (deliveryAt
       && (deliveryAt.getTime() <= pickupAt.getTime()
@@ -653,8 +650,8 @@ router.patch('/:id', async (req, res) => {
     return res.status(400).json({ error: 'Pickup location, delivery location and cargo are required.' });
   }
 
-  const pickupAt = b.pickupAt && !Number.isNaN(Date.parse(b.pickupAt)) ? new Date(b.pickupAt) : null;
-  const deliveryAt = b.deliveryAt && !Number.isNaN(Date.parse(b.deliveryAt)) ? new Date(b.deliveryAt) : null;
+  const pickupAt = parseInstant(b.pickupAt);
+  const deliveryAt = parseInstant(b.deliveryAt);
   const rawQuantity = Number.parseInt(String(b.quantity ?? ''), 10);
   const quantity = Number.isNaN(rawQuantity) || rawQuantity < 0 ? null : rawQuantity;
   const unit = String(b.unit ?? '').trim() || 'Units';

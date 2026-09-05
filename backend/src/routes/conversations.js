@@ -24,6 +24,12 @@ router.get("/", async (req, res) => {
               WHERE m.conversation_id = c.id
               ORDER BY m.created_at DESC
               LIMIT 1)                                   AS last_message,
+            (SELECT COUNT(*)::int
+               FROM messages m
+              WHERE m.conversation_id = c.id
+                AND m.sender_type = 'DRIVER'
+                AND m.created_at > COALESCE(c.manager_last_read_at, c.created_at))
+                                                        AS unread_count,
             c.last_message_at,
             c.ai_paused_at
        FROM conversations c
@@ -43,11 +49,27 @@ router.get("/", async (req, res) => {
       jobNumber: row.job_number,
       lastMessage: row.last_message ?? "",
       lastActivity: row.last_message_at,
-      unread: 0,
+      unread: row.unread_count,
       verified: row.verification_status === "VERIFIED",
       aiPaused: row.ai_paused_at != null,
     })),
   );
+});
+
+router.post("/:id/read", async (req, res) => {
+  const updated = await pool.query(
+    `UPDATE conversations
+        SET manager_last_read_at = now()
+      WHERE id = $1
+      RETURNING manager_last_read_at`,
+    [req.params.id],
+  );
+
+  if (updated.rows.length === 0) {
+    return res.status(404).json({ error: "Conversation not found" });
+  }
+
+  res.json({ readAt: updated.rows[0].manager_last_read_at });
 });
 
 router.get("/:id", async (req, res) => {
@@ -106,6 +128,30 @@ router.get("/:id/messages", async (req, res) => {
     [req.params.id],
   );
 
+  const attachments = await pool.query(
+    `SELECT a.id, a.message_id, a.attachment_type, a.original_filename,
+            a.mime_type, a.public_url, a.created_at
+       FROM attachments a
+       JOIN messages m ON m.id = a.message_id
+      WHERE m.conversation_id = $1
+      ORDER BY a.created_at ASC`,
+    [req.params.id],
+  );
+
+  const attachmentsByMessage = new Map();
+  for (const attachment of attachments.rows) {
+    const list = attachmentsByMessage.get(attachment.message_id) ?? [];
+    list.push({
+      id: attachment.id,
+      type: attachment.attachment_type,
+      filename: attachment.original_filename,
+      mimeType: attachment.mime_type,
+      publicUrl: attachment.public_url ?? null,
+      createdAt: attachment.created_at,
+    });
+    attachmentsByMessage.set(attachment.message_id, list);
+  }
+
   res.json(
     result.rows.map((row) => ({
       id: row.id,
@@ -123,6 +169,7 @@ router.get("/:id/messages", async (req, res) => {
             fields: interpretationFields(row.structured_output),
           }
         : undefined,
+      attachments: attachmentsByMessage.get(row.id) ?? [],
     })),
   );
 });

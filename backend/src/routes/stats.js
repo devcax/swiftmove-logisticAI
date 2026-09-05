@@ -60,13 +60,11 @@ router.get('/sidebar-counts', async (_req, res) => {
   try {
     const conversations = await pool.query(
       `SELECT COUNT(*)::int AS count
-         FROM conversations c
+         FROM messages m
+         JOIN conversations c ON c.id = m.conversation_id
         WHERE c.status = 'OPEN'
-          AND (SELECT m.sender_type
-                 FROM messages m
-                WHERE m.conversation_id = c.id
-                ORDER BY m.created_at DESC
-                LIMIT 1) = 'DRIVER'`
+          AND m.sender_type = 'DRIVER'
+          AND m.created_at > COALESCE(c.manager_last_read_at, c.created_at)`
     );
     res.json({ conversations: conversations.rows[0].count });
   } catch (err) {

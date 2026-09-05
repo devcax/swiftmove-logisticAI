@@ -26,6 +26,15 @@ export interface ApiInterpretation {
   fields: { label: string; value: string }[];
 }
 
+export interface ApiChatAttachment {
+  id: string;
+  type: string;
+  filename: string | null;
+  mimeType: string | null;
+  publicUrl: string | null;
+  createdAt: string;
+}
+
 export interface ApiChatMessage {
   id: string;
   kind: ApiMessageKind;
@@ -34,6 +43,7 @@ export interface ApiChatMessage {
   time: string; 
   deliveryStatus: "RECEIVED" | "QUEUED" | "SENT" | "DELIVERED" | "READ" | "FAILED";
   interpretation?: ApiInterpretation;
+  attachments: ApiChatAttachment[];
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -54,6 +64,10 @@ export function fetchConversations(): Promise<ApiConversationSummary[]> {
 
 export function fetchConversationMessages(conversationId: string): Promise<ApiChatMessage[]> {
   return request<ApiChatMessage[]>(`/api/conversations/${conversationId}/messages`);
+}
+
+export function markConversationRead(conversationId: string): Promise<{ readAt: string }> {
+  return request(`/api/conversations/${conversationId}/read`, { method: "POST" });
 }
 
 export function sendManagerMessage(conversationId: string, body: string): Promise<ApiChatMessage> {
@@ -156,6 +170,33 @@ export function approveJobRequest(id: string): Promise<{ ok: boolean; jobNumber:
 
 export function rejectJobRequest(id: string, reason?: string): Promise<{ ok: boolean; jobNumber: string; driver: string }> {
   return request(`/api/job-requests/${id}/reject`, { method: "POST", body: JSON.stringify({ reason: reason ?? null }) });
+}
+
+// One combined, reverse-chronological feed of every decision a manager has
+// made on a driver's ask - taking a job, cancelling one, or closing one out -
+// each tagged with which of the three it was.
+export interface ApiRequestHistoryEntry {
+  id: string;
+  type: "JOB_REQUEST" | "CANCELLATION" | "CLOSURE";
+  decision: string;
+  decidedAt: string;
+  job: {
+    id: string;
+    jobNumber: string;
+    cargo: string | null;
+    pickup: string | null;
+    delivery: string | null;
+  };
+  driver: {
+    id: string | null;
+    name: string;
+    phone: string;
+    verified: boolean;
+  };
+}
+
+export function fetchRequestHistory(): Promise<ApiRequestHistoryEntry[]> {
+  return request<ApiRequestHistoryEntry[]>(`/api/job-requests/history`);
 }
 
 {/*Jobs*/}

@@ -53,11 +53,11 @@ const STATUS_TONE: Record<string, { bg: string; fg: string }> = {
 };
 
 const FILTERS: { key: string; label: string }[] = [
+  { key: "", label: "All" },
   { key: "OPEN,UNDER_REVIEW", label: "Active" },
   { key: "OPEN", label: "Open" },
   { key: "UNDER_REVIEW", label: "Under review" },
   { key: "RESOLVED", label: "Resolved" },
-  { key: "", label: "All" },
 ];
 
 function humanize(value: string) {
@@ -85,7 +85,7 @@ function Badge({ label, tone }: { label: string; tone: { bg: string; fg: string 
 }
 
 export default function IncidentsPage() {
-  const [filter, setFilter] = React.useState("OPEN,UNDER_REVIEW");
+  const [filter, setFilter] = React.useState("");
   const [incidents, setIncidents] = React.useState<ApiIncidentSummary[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [actionError, setActionError] = React.useState<string | null>(null);

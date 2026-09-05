@@ -65,6 +65,120 @@ router.get('/', async (req, res) => {
   );
 });
 
+// Unified history across all three things a driver asks a manager to decide
+// on: taking a job, cancelling one, or closing one out. Each source lives in
+// its own table (job_requests has a row per ask; cancellations and closures
+// are just status transitions on jobs/job_assignments, so their decisions are
+// read back from audit_logs) - this merges them into one reverse-chronological
+// feed, tagged with `type` so the UI can label each row.
+router.get('/history', async (req, res) => {
+  const result = await pool.query(
+    `SELECT * FROM (
+       SELECT
+         'JOB_REQUEST'::text AS type,
+         jr.id::text AS id,
+         jr.status AS decision,
+         COALESCE(jr.reviewed_at, jr.requested_at) AS decided_at,
+         j.id AS job_id, j.job_number, j.cargo_description AS cargo,
+         pl.name AS pickup, dl.name AS delivery,
+         d.id AS driver_id, d.name AS driver_name,
+         wa.phone_e164 AS driver_phone, wa.verification_status
+       FROM job_requests jr
+       JOIN jobs j ON j.id = jr.job_id
+       LEFT JOIN job_stops ps ON ps.job_id = j.id AND ps.stop_type = 'PICKUP'
+       LEFT JOIN locations pl ON pl.id = ps.location_id
+       LEFT JOIN job_stops ds ON ds.job_id = j.id AND ds.stop_type = 'DELIVERY'
+       LEFT JOIN locations dl ON dl.id = ds.location_id
+       JOIN drivers d ON d.id = jr.driver_id
+       LEFT JOIN driver_whatsapp_accounts wa ON wa.driver_id = d.id AND wa.is_primary
+      WHERE jr.status IN ('APPROVED', 'REJECTED')
+
+      UNION ALL
+
+      SELECT
+        'CANCELLATION'::text AS type,
+        al.id::text AS id,
+        CASE al.action
+          WHEN 'CANCELLATION_RELEASE' THEN 'APPROVED'
+          WHEN 'CANCELLATION_CANCEL' THEN 'CANCELLED'
+          WHEN 'CANCELLATION_REJECT' THEN 'REJECTED'
+          ELSE al.action
+        END AS decision,
+        al.created_at AS decided_at,
+        j.id AS job_id, j.job_number, j.cargo_description AS cargo,
+        pl.name AS pickup, dl.name AS delivery,
+        d.id AS driver_id, d.name AS driver_name,
+        wa.phone_e164 AS driver_phone, wa.verification_status
+      FROM audit_logs al
+      JOIN jobs j ON j.id = al.entity_id AND al.entity_type = 'JOB'
+      LEFT JOIN job_stops ps ON ps.job_id = j.id AND ps.stop_type = 'PICKUP'
+      LEFT JOIN locations pl ON pl.id = ps.location_id
+      LEFT JOIN job_stops ds ON ds.job_id = j.id AND ds.stop_type = 'DELIVERY'
+      LEFT JOIN locations dl ON dl.id = ds.location_id
+      LEFT JOIN LATERAL (
+        SELECT ja.driver_id FROM job_assignments ja
+         WHERE ja.job_id = j.id ORDER BY ja.assigned_at DESC LIMIT 1
+      ) la ON true
+      LEFT JOIN drivers d ON d.id = la.driver_id
+      LEFT JOIN driver_whatsapp_accounts wa ON wa.driver_id = d.id AND wa.is_primary
+      WHERE al.action IN ('CANCELLATION_RELEASE', 'CANCELLATION_CANCEL', 'CANCELLATION_REJECT')
+
+      UNION ALL
+
+      SELECT
+        'CLOSURE'::text AS type,
+        al.id::text AS id,
+        CASE al.action
+          WHEN 'JOB_COMPLETED' THEN 'APPROVED'
+          WHEN 'CORRECTION_REQUESTED' THEN 'REQUIRES_CORRECTION'
+          ELSE al.action
+        END AS decision,
+        al.created_at AS decided_at,
+        j.id AS job_id, j.job_number, j.cargo_description AS cargo,
+        pl.name AS pickup, dl.name AS delivery,
+        d.id AS driver_id, d.name AS driver_name,
+        wa.phone_e164 AS driver_phone, wa.verification_status
+      FROM audit_logs al
+      JOIN jobs j ON j.id = al.entity_id AND al.entity_type = 'JOB'
+      LEFT JOIN job_stops ps ON ps.job_id = j.id AND ps.stop_type = 'PICKUP'
+      LEFT JOIN locations pl ON pl.id = ps.location_id
+      LEFT JOIN job_stops ds ON ds.job_id = j.id AND ds.stop_type = 'DELIVERY'
+      LEFT JOIN locations dl ON dl.id = ds.location_id
+      LEFT JOIN LATERAL (
+        SELECT ja.driver_id FROM job_assignments ja
+         WHERE ja.job_id = j.id ORDER BY ja.assigned_at DESC LIMIT 1
+      ) la ON true
+      LEFT JOIN drivers d ON d.id = la.driver_id
+      LEFT JOIN driver_whatsapp_accounts wa ON wa.driver_id = d.id AND wa.is_primary
+      WHERE al.action IN ('JOB_COMPLETED', 'CORRECTION_REQUESTED')
+     ) combined
+     ORDER BY decided_at DESC
+     LIMIT 150`
+  );
+
+  res.json(
+    result.rows.map((r) => ({
+      id: r.id,
+      type: r.type,
+      decision: r.decision,
+      decidedAt: r.decided_at,
+      job: {
+        id: r.job_id,
+        jobNumber: r.job_number,
+        cargo: r.cargo,
+        pickup: r.pickup,
+        delivery: r.delivery,
+      },
+      driver: {
+        id: r.driver_id,
+        name: r.driver_name ?? 'Unassigned',
+        phone: r.driver_phone ?? '',
+        verified: r.verification_status === 'VERIFIED',
+      },
+    }))
+  );
+});
+
 router.post('/:id/approve', async (req, res) => {
   try {
     const { job, driver, supersededDrivers } = await workflow.approveRequest(req.params.id);

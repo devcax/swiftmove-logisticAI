@@ -131,6 +131,7 @@ async function handleInboundMessage(message) {
   }
 
   const { messageType, bodyText, buttonId } = extractContent(message);
+  const replyToMessageId = message.context?.id ?? null;
   const inserted = await pool.query(
     `INSERT INTO messages (
         conversation_id, external_message_id, sender_type, sender_driver_id,
@@ -183,6 +184,7 @@ async function handleInboundMessage(message) {
       messageType,
       bodyText,
       buttonId,
+      replyToMessageId,
     }).catch((err) => console.error(`Bot failed for message ${storedMessageId}:`, err.message));
   }
 

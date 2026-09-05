@@ -1,6 +1,7 @@
 const { pool } = require('../db');
 const sm = require('./jobStateMachine');
 const { matchesExpectedCode } = require('../ai/documentCode');
+const { formatWhen } = require('../time');
 
 const DEMO_MANAGER_ID = '00000000-0000-0000-0000-000000000010';
 
@@ -20,7 +21,7 @@ class WorkflowError extends Error {
 const START_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 function fmtWhen(value) {
-  return new Date(value).toLocaleString('en-GB', {
+  return formatWhen(value, {
     day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
   });
 }
@@ -1923,7 +1924,13 @@ async function completeJob(jobId, managerId = DEMO_MANAGER_ID) {
     await client.query('BEGIN');
     const job = (await client.query('SELECT * FROM jobs WHERE id = $1 FOR UPDATE', [jobId])).rows[0];
     if (!job) throw new WorkflowError('Job not found', 'NOT_FOUND');
-    if (!['DRIVER_SUBMITTED_COMPLETION', 'MANAGER_REVIEW', 'REQUIRES_CORRECTION'].includes(job.current_status)) {
+    if (![
+      'DELIVERED',
+      'DELIVERED_WITH_EXCEPTION',
+      'DRIVER_SUBMITTED_COMPLETION',
+      'MANAGER_REVIEW',
+      'REQUIRES_CORRECTION',
+    ].includes(job.current_status)) {
       // A double-click on Confirm Closure (or a repeat API call) lands here:
       // the job is already done, so report that instead of failing, and write
       // no duplicate completion/release events.
