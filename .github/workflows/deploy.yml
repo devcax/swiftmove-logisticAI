@@ -1,0 +1,173 @@
+name: fleetlink deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.backend == 'true' }}
+      frontend: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.frontend == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+            frontend:
+              - 'frontend/**'
+
+  # ------------------------------------------------------------------
+  # Sync the repo on the server. .env files are untracked in this repo,
+  # so git reset --hard never touches them — we only need to keep them
+  # (and installed deps / build cache) out of git clean.
+  # ------------------------------------------------------------------
+  sync-code:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p ${{ secrets.SSH_PORT || '22' }} -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Sync repo on server
+        run: |
+          ssh -i ~/.ssh/id_rsa -p ${{ secrets.SSH_PORT || '22' }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
+            "WORK_DIR='${{ secrets.WORK_DIR }}' REPO_URL='git@github.com:${{ github.repository }}.git' bash -s" << 'ENDSSH'
+            set -e
+
+            mkdir -p ~/.ssh
+            ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null || true
+
+            if [ -d "$WORK_DIR/.git" ]; then
+              echo "Repo already present at $WORK_DIR — syncing..."
+              cd "$WORK_DIR"
+              git fetch origin main
+              git reset --hard origin/main
+              git clean -fd \
+                -e backend/.env \
+                -e frontend/.env \
+                -e frontend/.env.local \
+                -e backend/node_modules \
+                -e frontend/node_modules \
+                -e frontend/.next
+            else
+              echo "No repo at $WORK_DIR yet — cloning fresh..."
+              mkdir -p "$WORK_DIR"
+              git clone "$REPO_URL" "$WORK_DIR"
+              echo ">>> First deploy: create backend/.env and frontend/.env on the server before apps can start."
+            fi
+
+            echo "Code synced to $(cd "$WORK_DIR" && git rev-parse --short HEAD)"
+          ENDSSH
+
+  # ------------------------------------------------------------------
+  # Backend (Express API + WhatsApp webhook) + database migrations
+  # ------------------------------------------------------------------
+  deploy-backend:
+    needs: [changes, sync-code]
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p ${{ secrets.SSH_PORT || '22' }} -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Install deps, migrate DB & restart pm2
+        run: |
+          ssh -i ~/.ssh/id_rsa -p ${{ secrets.SSH_PORT || '22' }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
+            "WORK_DIR='${{ secrets.WORK_DIR }}' bash -s" << 'ENDSSH'
+            set -e
+            cd "$WORK_DIR/backend"
+
+            echo "Installing backend dependencies..."
+            npm install
+
+            # --- Database migrations ---
+            # Auto-detect: Prisma once a schema exists, otherwise the
+            # project's hand-written SQL migrations (migrations/*.sql).
+            if [ -f "prisma/schema.prisma" ]; then
+              echo "Prisma schema found — running generate + migrate deploy..."
+              npx prisma generate
+              # migrate deploy = production-safe apply; never use `migrate dev` on a server
+              npx prisma migrate deploy
+            else
+              echo "No Prisma schema — running SQL migrations..."
+              npm run db:migrate
+            fi
+
+            echo "Restarting backend with PM2..."
+            if pm2 describe fleetlink-backend >/dev/null 2>&1; then
+              pm2 restart fleetlink-backend --update-env
+            else
+              pm2 start server.js --name fleetlink-backend
+            fi
+            pm2 save
+          ENDSSH
+
+  # ------------------------------------------------------------------
+  # Frontend (Next.js dashboard)
+  # ------------------------------------------------------------------
+  deploy-frontend:
+    needs: [changes, sync-code]
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p ${{ secrets.SSH_PORT || '22' }} -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Build & restart pm2
+        run: |
+          ssh -i ~/.ssh/id_rsa -p ${{ secrets.SSH_PORT || '22' }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
+            "WORK_DIR='${{ secrets.WORK_DIR }}' \
+             NEXT_PUBLIC_API_URL='${{ vars.NEXT_PUBLIC_API_URL }}' \
+             FRONTEND_PORT='${{ vars.FRONTEND_PORT || '3000' }}' \
+             bash -s" << 'ENDSSH'
+            set -e
+            cd "$WORK_DIR/frontend"
+
+            echo "Installing frontend dependencies..."
+            npm install
+
+            # NEXT_PUBLIC_* is inlined at build time — must be set BEFORE the build.
+            ENV_FILE=".env"
+            touch "$ENV_FILE"
+            if grep -q "^NEXT_PUBLIC_API_URL=" "$ENV_FILE"; then
+              sed -i "s|^NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}|" "$ENV_FILE"
+            else
+              echo "NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}" >> "$ENV_FILE"
+            fi
+
+            echo "Building frontend..."
+            npm run build
+
+            echo "Restarting frontend with PM2..."
+            if pm2 describe fleetlink-frontend >/dev/null 2>&1; then
+              PORT=$FRONTEND_PORT pm2 restart fleetlink-frontend --update-env
+            else
+              PORT=$FRONTEND_PORT pm2 start npm --name fleetlink-frontend -- run start
+            fi
+            pm2 save
+          ENDSSH

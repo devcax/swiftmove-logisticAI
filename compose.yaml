@@ -1,0 +1,22 @@
+name: swiftmove
+
+services:
+  app:
+    image: swiftmove:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    env_file:
+      - ./backend/.env
+      - ./frontend/.env
+
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      BACKEND_INTERNAL_URL: http://127.0.0.1:4000
+
+    ports:
+      - "3000:3000"
+
+    restart: unless-stopped

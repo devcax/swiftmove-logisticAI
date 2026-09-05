@@ -1,0 +1,54 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# documentation / planning markdown files
+*.md
+AI WhatsApp Logistics MVP.md
+AI-Powered WhatsApp Logistics Workflow.md
+Logistics AI MVP_ Big-Picture System Map and Task Plan.md
+WhatsApp-Based AI Logistics Workflow System.md
+
+.claude/
+
+Dockerfile
+Dockerfile.dev
+Dockerfile.prod
